@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { supabase } from './lib/supabase';
-import { createInitialState, ROLES, isGameComplete, getNextRoleTurn } from './gamelogic';
+import { createInitialState, ROLES, isGameComplete, getNextRoleTurn } from './gameLogic';
 import type { GameState, Player, TelegramWebApp } from './types';
 import { Crown, Coins, CheckCircle2, Circle, Play, Send, Users } from 'lucide-react';
 
