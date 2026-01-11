@@ -1,45 +1,43 @@
 export const ROLES = [
-    { id: 1, name: "Ассасин", power: "Убить кого-то" },
-    { id: 2, name: "Вор", power: "Ограбить кого-то" },
-    { id: 3, name: "Чародей", power: "Обмен картами" },
-    { id: 4, name: "Король", power: "Дает золото за желтые кварталы" },
-    { id: 5, name: "Епископ", power: "Дает золото за синие кварталы" },
-    { id: 6, name: "Купец", power: "Дает золото за зеленые кварталы" },
-    { id: 7, name: "Зодчий", power: "Строит до 3-х кварталов" },
-    { id: 8, name: "Кондотьер", power: "Дает золото за красные кварталы" }
+    { id: 1, name: "Ассасин", color: "text-slate-400", power: "Убивает персонажа" },
+    { id: 2, name: "Вор", color: "text-slate-400", power: "Крадет золото" },
+    { id: 3, name: "Чародей", color: "text-purple-400", power: "Меняет карты" },
+    { id: 4, name: "Король", color: "text-yellow-400", power: "Золото за желтые" },
+    { id: 5, name: "Епископ", color: "text-blue-400", power: "Золото за синие" },
+    { id: 6, name: "Купец", color: "text-green-400", power: "Золото за зеленые" },
+    { id: 7, name: "Зодчий", color: "text-slate-300", power: "Строит 3 карты" },
+    { id: 8, name: "Кондотьер", color: "text-red-400", power: "Золото за красные" }
 ];
 
 export const DISTRICTS = [
-    { id: 'd1', name: "Таверна", cost: 1, color: "green" },
-    { id: 'd2', name: "Рынок", cost: 2, color: "green" },
-    { id: 'd3', name: "Ратуша", cost: 5, color: "green" },
-    { id: 'd4', name: "Храм", cost: 1, color: "blue" },
-    { id: 'd5', name: "Собор", cost: 5, color: "blue" },
-    { id: 'd6', name: "Крепость", cost: 3, color: "red" },
-    { id: 'd7', name: "Замок", cost: 4, color: "yellow" },
-    { id: 'd8', name: "Дворец", cost: 5, color: "yellow" },
-    { id: 'd9', name: "Кузница", cost: 3, color: "red" },
-    { id: 'd10', name: "Тюрьма", cost: 2, color: "red" },
+    { id: 'd1', name: "Таверна", cost: 1, color: "green", type: "Торговый" },
+    { id: 'd2', name: "Рынок", cost: 2, color: "green", type: "Торговый" },
+    { id: 'd4', name: "Храм", cost: 1, color: "blue", type: "Религиозный" },
+    { id: 'd6', name: "Крепость", cost: 3, color: "red", type: "Военный" },
+    { id: 'd7', name: "Замок", cost: 4, color: "yellow", type: "Дворянский" },
+    { id: 'd11', name: "Ратуша", cost: 5, color: "green", type: "Торговый" },
+    { id: 'd12', name: "Монастырь", cost: 3, color: "blue", type: "Религиозный" },
 ];
 
-export const createInitialState = (firstPlayer: any) => {
+export const createInitialState = (user: any) => {
     const deck = [...DISTRICTS, ...DISTRICTS, ...DISTRICTS].sort(() => Math.random() - 0.5);
-
     return {
-        phase: "LOBBY", // LOBBY, SELECTION, TURNS, END
+        phase: "LOBBY",
         players: [{
-            id: String(firstPlayer.id),
-            name: firstPlayer.first_name,
+            id: String(user.id),
+            name: user.first_name,
             gold: 2,
             hand: [deck.pop(), deck.pop(), deck.pop(), deck.pop()],
             districts: [],
             role: null,
+            isReady: false,
             isHost: true
         }],
+        crownPlayerId: null,
         availableRoles: [],
         currentPickerIndex: 0,
-        currentRoleTurn: 1,
+        currentRoleTurn: 0,
         deck: deck,
-        log: ["Игра создана. Ожидание игроков."]
+        log: ["Ожидание готовности игроков..."]
     };
 };

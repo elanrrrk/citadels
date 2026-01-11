@@ -107,3 +107,64 @@ button:focus-visible {
 .bg-yellow-500 {
   background-color: #eab308;
 }
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-[#0f172a] overflow-hidden select-none;
+    -webkit-tap-highlight-color: transparent;
+  }
+}
+
+.custom-scrollbar::-webkit-scrollbar {
+  width: 4px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: #334155;
+  border-radius: 10px;
+}
+
+/* Цвета кварталов */
+.bg-green-500 {
+  background: linear-gradient(135deg, #22c55e, #15803d);
+}
+
+.bg-blue-500 {
+  background: linear-gradient(135deg, #3b82f6, #1e40af);
+}
+
+.bg-red-500 {
+  background: linear-gradient(135deg, #ef4444, #b91c1c);
+}
+
+.bg-yellow-500 {
+  background: linear-gradient(135deg, #eab308, #a16207);
+}
+
+.bg-purple-500 {
+  background: linear-gradient(135deg, #a855f7, #7e22ce);
+}
+
+.text-green-400 {
+  color: #4ade80;
+}
+
+.text-blue-400 {
+  color: #60a5fa;
+}
+
+.text-red-400 {
+  color: #f87171;
+}
+
+.text-yellow-400 {
+  color: #facc15;
+}
+
+.text-purple-400 {
+  color: #c084fc;
+}
