@@ -32,11 +32,8 @@ export const DISTRICTS: District[] = [
     { id: 'd18', name: "Лаборатория", cost: 5, color: "purple", type: "Уникальный" },
 ];
 
-/**
- * Generate a unique 6-character room code
- */
 export const generateRoomCode = (): string => {
-    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // Removed ambiguous characters
+    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
     let code = '';
     for (let i = 0; i < 6; i++) {
         code += chars.charAt(Math.floor(Math.random() * chars.length));
@@ -44,9 +41,6 @@ export const generateRoomCode = (): string => {
     return code;
 };
 
-/**
- * Shuffle array using Fisher-Yates algorithm
- */
 export const shuffleArray = <T>(array: T[]): T[] => {
     const shuffled = [...array];
     for (let i = shuffled.length - 1; i > 0; i--) {
@@ -56,21 +50,10 @@ export const shuffleArray = <T>(array: T[]): T[] => {
     return shuffled;
 };
 
-/**
- * Create initial game state
- */
 export const createInitialState = (user: TelegramUser, roomCode: string): GameState => {
-    // Create deck with 3 copies of each district
     const fullDeck = [...DISTRICTS, ...DISTRICTS, ...DISTRICTS];
     const deck = shuffleArray(fullDeck);
-
-    // Give first player 4 cards
-    const initialHand = [
-        deck.pop()!,
-        deck.pop()!,
-        deck.pop()!,
-        deck.pop()!
-    ];
+    const initialHand = [deck.pop()!, deck.pop()!, deck.pop()!, deck.pop()!];
 
     return {
         phase: "LOBBY",
@@ -82,7 +65,11 @@ export const createInitialState = (user: TelegramUser, roomCode: string): GameSt
             districts: [],
             role: null,
             isReady: false,
-            isHost: true
+            isHost: true,
+            turnActionTaken: false,
+            districtsBuilt: 0,
+            isKilled: false,
+            isStolen: false
         }],
         crownPlayerId: null,
         availableRoles: [],
@@ -90,22 +77,91 @@ export const createInitialState = (user: TelegramUser, roomCode: string): GameSt
         currentRoleTurn: 0,
         deck: deck,
         log: ["Игра создана. Ожидание других игроков..."],
+        killedRole: null,
+        stolenRole: null,
         roomCode: roomCode,
         lobbyName: `${user.first_name}'s Lobby`,
         createdAt: new Date().toISOString()
     };
 };
 
-/**
- * Check if game is complete (any player has 8 districts)
- */
+export const handleKingPower = (state: GameState, userId: string): GameState => {
+    const s = { ...state };
+    s.crownPlayerId = userId;
+    s.log.push(`👑 Король забирает корону!`);
+    return s;
+};
+
+export const handleMerchantBonus = (state: GameState, userId: string): GameState => {
+    const s = { ...state };
+    const p = s.players.find(p => p.id === userId);
+    if (p) {
+        p.gold += 1;
+        s.log.push(`💰 Купец получает 1 бонусный золотой`);
+    }
+    return s;
+};
+
+export const handleNextRoleAdvance = (state: GameState): GameState => {
+    const s = { ...state };
+    let nextTurn = s.currentRoleTurn + 1;
+
+    if (nextTurn > 8) {
+        s.phase = "SELECTION";
+        s.currentRoleTurn = 0;
+        s.players.forEach(p => {
+            p.role = null;
+            p.turnActionTaken = false;
+            p.districtsBuilt = 0;
+            p.isKilled = false;
+            p.isStolen = false;
+        });
+        s.killedRole = null;
+        s.stolenRole = null;
+        s.availableRoles = shuffleArray([...ROLES]);
+        s.currentPickerIndex = s.players.findIndex(p => p.id === s.crownPlayerId);
+        s.log.push("🔄 Раунд окончен. Выбор ролей нового раунда!");
+        return s;
+    }
+
+    s.currentRoleTurn = nextTurn;
+    const roleName = ROLES.find(r => r.id === s.currentRoleTurn)?.name;
+    const activePlayer = s.players.find(p => p.role === roleName);
+
+    if (!activePlayer) {
+        s.log.push(`📢 Роль ${roleName} не выбрана. Пропуск...`);
+        return handleNextRoleAdvance(s);
+    }
+
+    if (activePlayer.isKilled) {
+        s.log.push(`💀 Роль (${activePlayer.name}) была убита! Пропуск хода...`);
+        return handleNextRoleAdvance(s);
+    }
+
+    if (activePlayer.isStolen) {
+        const thief = s.players.find(p => p.role === "Вор");
+        if (thief && activePlayer.gold > 0) {
+            thief.gold += activePlayer.gold;
+            s.log.push(`💸 Вор украл ${activePlayer.gold} золота у ${activePlayer.name}!`);
+            activePlayer.gold = 0;
+        }
+    }
+
+    if (roleName === "Король") {
+        return handleKingPower(s, activePlayer.id);
+    }
+    if (roleName === "Купец") {
+        return handleMerchantBonus(s, activePlayer.id);
+    }
+
+    s.log.push(`⚡️ Ход игрока ${activePlayer.name} (${roleName})`);
+    return s;
+};
+
 export const isGameComplete = (state: GameState): boolean => {
     return state.players.some(p => p.districts.length >= 8);
 };
 
-/**
- * Get next role turn
- */
 export const getNextRoleTurn = (currentTurn: number): number => {
     return currentTurn >= 8 ? 1 : currentTurn + 1;
 };

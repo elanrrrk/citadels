@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { supabase } from './lib/supabase';
-import { createInitialState, ROLES, isGameComplete, getNextRoleTurn, generateRoomCode } from './gameLogic';
+import { createInitialState, ROLES, isGameComplete, handleNextRoleAdvance, generateRoomCode } from './gameLogic';
 import type { GameState, Player, TelegramWebApp, LobbyInfo, AppView } from './types';
 import { Crown, Coins, CheckCircle2, Circle, Play, Send, Users, Plus, Search, X, LogOut } from 'lucide-react';
 
@@ -38,7 +38,7 @@ export default function App() {
     try {
       const { error } = await supabase
         .from('games')
-        .upsert({ room_code: newState.roomCode || roomCode, state: newState }, { onConflict: 'room_code' });
+        .upsert({ room_code: newState.roomCode || roomCode, state: newState as any } as any, { onConflict: 'room_code' });
 
       if (error) {
         console.error('Database update error:', error);
@@ -56,7 +56,7 @@ export default function App() {
     try {
       const { error } = await supabase
         .from('games')
-        .insert({ room_code: newRoomCode, state: newState });
+        .insert({ room_code: newRoomCode, state: newState as any } as any);
 
       if (error) {
         console.error('Error creating lobby:', error);
@@ -91,6 +91,7 @@ export default function App() {
             player_count: row.state.players.length,
             created_at: row.state.createdAt || new Date().toISOString()
           }))
+          .filter((lobby: LobbyInfo) => lobby.player_count > 0) // Don't show empty lobbies
           .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
         setLobbies(lobbyList);
       }
@@ -118,7 +119,7 @@ export default function App() {
         return;
       }
 
-      const s = data.state as GameState;
+      const s = (data as any).state as GameState;
 
       if (s.phase !== 'LOBBY') {
         alert('Эта игра уже началась!');
@@ -133,9 +134,13 @@ export default function App() {
           isReady: false,
           hand: [s.deck.pop()!, s.deck.pop()!, s.deck.pop()!, s.deck.pop()!],
           districts: [],
-          role: null
+          role: null,
+          turnActionTaken: false,
+          districtsBuilt: 0,
+          isKilled: false,
+          isStolen: false
         });
-        s.log.push(`${user.first_name} присоединился к игре`);
+        s.log = [...s.log, `${user.first_name} присоединился к игре`];
         await updateDB(s);
       }
 
@@ -147,13 +152,41 @@ export default function App() {
     }
   };
 
-  const exitToLanding = () => {
+  const exitToLanding = async () => {
     haptic('light');
-    if (game && game.phase !== 'LOBBY') {
-      if (!confirm('Вы уверены, что хотите выйти из игры?')) {
-        return;
+
+    if (game && roomCode) {
+      // If we are in a game/lobby, we should remove ourselves from the players list
+      const s = { ...game };
+      const playerIndex = s.players.findIndex(p => p.id === String(user.id));
+
+      if (playerIndex !== -1) {
+        if (s.phase !== 'LOBBY') {
+          if (!confirm('Вы уверены, что хотите выйти из игры?')) {
+            return;
+          }
+        }
+
+        s.players.splice(playerIndex, 1);
+        s.log.push(`${user.first_name} покинул игру`);
+
+        if (s.players.length === 0) {
+          // If no players left, delete the game
+          try {
+            await supabase
+              .from('games')
+              .delete()
+              .eq('room_code', roomCode);
+          } catch (e) {
+            console.error('Failed to delete empty game:', e);
+          }
+        } else {
+          // Update game state with player removed
+          await updateDB(s);
+        }
       }
     }
+
     setGame(null);
     setRoomCode("");
     setCurrentView('LANDING');
@@ -168,7 +201,13 @@ export default function App() {
     if (!player) return;
 
     player.isReady = !player.isReady;
-    s.log.push(player.isReady ? `${player.name} готов!` : `${player.name} не готов`);
+
+    // Create log message
+    const logMsg = player.isReady ? `${player.name} готов!` : `${player.name} не готов`;
+
+    // Add log and update DB
+    s.log = [...s.log, logMsg];
+    setGame(s); // Optimistic update
     await updateDB(s);
   };
 
@@ -216,10 +255,42 @@ export default function App() {
     // If all players picked roles, start turns
     if (s.currentPickerIndex >= s.players.length) {
       s.phase = "TURNS";
-      s.currentRoleTurn = 1;
-      s.log.push("⚔️ Роли выбраны! Начинаются ходы...");
+      s.currentRoleTurn = 0; // Will be advanced to 1 by handleNextRoleAdvance
+      const nextState = handleNextRoleAdvance(s);
+      await updateDB(nextState);
+    } else {
+      await updateDB(s);
     }
+  };
 
+  const takeGold = async () => {
+    if (!game) return;
+    haptic('medium');
+    const s = { ...game };
+    const me = s.players.find(p => p.id === String(user.id));
+    if (!me) return;
+
+    me.gold += 2;
+    me.turnActionTaken = true;
+    s.log.push(`${me.name} взял 2 золотых`);
+    await updateDB(s);
+  };
+
+  const takeCards = async () => {
+    if (!game) return;
+    haptic('medium');
+    const s = { ...game };
+    const me = s.players.find(p => p.id === String(user.id));
+    if (!me || s.deck.length < 2) return;
+
+    // Simplified: draw 2, keep 1, put 1 back at bottom
+    const card1 = s.deck.pop()!;
+    const card2 = s.deck.pop()!;
+    me.hand.push(card1);
+    s.deck.unshift(card2); // Put back to bottom
+
+    me.turnActionTaken = true;
+    s.log.push(`${me.name} потянул карты и выбрал одну`);
     await updateDB(s);
   };
 
@@ -233,6 +304,13 @@ export default function App() {
 
     const card = me.hand.find(c => c.id === districtId);
     if (!card) return;
+
+    // Check if player has already built maximum districts
+    const maxDistricts = me.role === "Зодчий" ? 3 : 1;
+    if (me.districtsBuilt >= maxDistricts) {
+      alert(me.role === "Зодчий" ? "Зодчий может строить только 3 района!" : "Можно построить только 1 район за ход!");
+      return;
+    }
 
     // Check if player has enough gold
     if (me.gold < card.cost) {
@@ -250,6 +328,7 @@ export default function App() {
     me.gold -= card.cost;
     me.districts.push(card);
     me.hand = me.hand.filter(c => c.id !== districtId);
+    me.districtsBuilt++;
     s.log.push(`${me.name} построил ${card.name} за ${card.cost} золота`);
 
     // Check if game is complete
@@ -269,29 +348,11 @@ export default function App() {
     const me = s.players.find((p: Player) => p.id === String(user.id));
     if (!me) return;
 
-    // Give gold for ending turn
-    me.gold += 2;
+    s.log.push(`${me.name} (${me.role}) завершил ход`);
 
-    // Draw a card if deck not empty
-    if (s.deck.length > 0) {
-      me.hand.push(s.deck.pop()!);
-    }
-
-    s.log.push(`${me.name} (${me.role}) завершил ход (+2 золота)`);
-
-    // Move to next role turn
-    s.currentRoleTurn = getNextRoleTurn(s.currentRoleTurn);
-
-    // If all roles finished, start new round
-    if (s.currentRoleTurn === 1) {
-      s.phase = "SELECTION";
-      s.players.forEach(p => p.role = null);
-      s.availableRoles = [...ROLES].sort(() => Math.random() - 0.5);
-      s.currentPickerIndex = s.players.findIndex((p: Player) => p.id === s.crownPlayerId);
-      s.log.push("🔄 Новый раунд! Выбор ролей...");
-    }
-
-    await updateDB(s);
+    // Use new helper to advance role turn
+    const nextState = handleNextRoleAdvance(s);
+    await updateDB(nextState);
   };
 
   useEffect(() => {
@@ -621,7 +682,7 @@ export default function App() {
       </div>
 
       {/* Action Panel */}
-      <div className="glass-strong p-6 border-t border-slate-700 rounded-t-[32px] shadow-[0_-10px_40px_rgba(0,0,0,0.5)] safe-bottom">
+      <div className="glass-strong p-6 border-t border-slate-700 rounded-t-[32px] shadow-[0_-10px_40px_rgba(0,0,0,0.5)] overflow-y-auto max-h-[40vh] pb-[calc(env(safe-area-inset-bottom)+1.5rem)]">
         {/* Lobby - Ready Button */}
         {game.phase === "LOBBY" && (
           <div className="space-y-3">
@@ -681,33 +742,60 @@ export default function App() {
             <h3 className="text-center text-brand-gold font-black text-sm uppercase tracking-widest">
               Ваш ход - {me.role}
             </h3>
-            <div className="flex gap-3 overflow-x-auto pb-2 px-1 custom-scrollbar">
-              {me.hand.map((c) => (
+
+            {!me.turnActionTaken ? (
+              <div className="grid grid-cols-2 gap-3">
                 <button
-                  key={c.id}
-                  onClick={() => buildDistrict(c.id)}
-                  disabled={me.gold < c.cost}
-                  className={`flex-shrink-0 w-24 h-36 rounded-xl p-2 border-2 flex flex-col justify-between items-start transition-all touch-feedback ${me.gold >= c.cost
-                    ? 'bg-slate-800 border-slate-700 hover:border-brand-gold hover:shadow-glow-yellow'
-                    : 'bg-slate-900/50 border-slate-800 opacity-50 cursor-not-allowed'
-                    }`}
+                  onClick={takeGold}
+                  className="flex flex-col items-center justify-center p-4 bg-slate-800 border border-slate-700 rounded-2xl hover:border-brand-gold transition-all touch-feedback group"
                 >
-                  <div className={`text-[10px] font-black uppercase text-${c.color}-400`}>
-                    {c.type}
-                  </div>
-                  <div className="text-xs font-bold leading-tight">{c.name}</div>
-                  <div className="w-full flex justify-end font-black text-brand-gold text-sm">
-                    💰{c.cost}
-                  </div>
+                  <Coins className="w-8 h-8 text-brand-gold mb-2 group-hover:scale-110 transition-transform" />
+                  <span className="text-sm font-bold text-white">Взять 2 золота</span>
                 </button>
-              ))}
-            </div>
-            <button
-              onClick={endTurn}
-              className="w-full py-4 bg-gradient-to-r from-blue-600 to-blue-700 rounded-2xl font-black text-sm tracking-widest flex items-center justify-center gap-2 shadow-lg transform active:scale-95 transition-all"
-            >
-              Завершить ход <Send className="w-4 h-4" />
-            </button>
+                <button
+                  onClick={takeCards}
+                  className="flex flex-col items-center justify-center p-4 bg-slate-800 border border-slate-700 rounded-2xl hover:border-brand-gold transition-all touch-feedback group"
+                >
+                  <Send className="w-8 h-8 text-slate-400 mb-2 group-hover:scale-110 transition-transform -rotate-45" />
+                  <span className="text-sm font-bold text-white">Взять карту</span>
+                </button>
+              </div>
+            ) : (
+              <>
+                <div className="flex gap-3 overflow-x-auto pb-2 px-1 custom-scrollbar">
+                  {me.hand.map((c) => (
+                    <button
+                      key={c.id}
+                      onClick={() => buildDistrict(c.id)}
+                      disabled={me.gold < c.cost || (me.districtsBuilt >= (me.role === "Зодчий" ? 3 : 1))}
+                      className={`flex-shrink-0 w-24 h-36 rounded-xl p-2 border-2 flex flex-col justify-between items-start transition-all touch-feedback ${(me.gold >= c.cost && (me.districtsBuilt < (me.role === "Зодчий" ? 3 : 1)))
+                        ? 'bg-slate-800 border-slate-700 hover:border-brand-gold hover:shadow-glow-yellow'
+                        : 'bg-slate-900/50 border-slate-800 opacity-50 cursor-not-allowed'
+                        }`}
+                    >
+                      <div className={`text-[10px] font-black uppercase text-${c.color}-400`}>
+                        {c.type}
+                      </div>
+                      <div className="text-xs font-bold leading-tight">{c.name}</div>
+                      <div className="w-full flex justify-end font-black text-brand-gold text-sm">
+                        💰{c.cost}
+                      </div>
+                    </button>
+                  ))}
+                  {me.hand.length === 0 && (
+                    <div className="w-full text-center py-8 text-slate-500 text-[10px] italic">
+                      Нет карт в руке
+                    </div>
+                  )}
+                </div>
+                <button
+                  onClick={endTurn}
+                  className="w-full py-4 bg-gradient-to-r from-blue-600 to-blue-700 rounded-2xl font-black text-sm tracking-widest flex items-center justify-center gap-2 shadow-lg transform active:scale-95 transition-all"
+                >
+                  Завершить ход <Send className="w-4 h-4" />
+                </button>
+              </>
+            )}
           </div>
         )}
 

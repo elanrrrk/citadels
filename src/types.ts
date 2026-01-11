@@ -62,6 +62,10 @@ export interface Player {
     role: string | null;
     isReady: boolean;
     isHost?: boolean;
+    turnActionTaken: boolean; // Has the player taken gold or cards?
+    districtsBuilt: number; // Counter for buildings this turn
+    isKilled: boolean; // For Assassin power
+    isStolen: boolean; // For Thief power
 }
 
 export type GamePhase = 'LOBBY' | 'SELECTION' | 'TURNS' | 'ENDED';
@@ -84,6 +88,8 @@ export interface GameState {
     currentRoleTurn: number;
     deck: District[];
     log: string[];
+    killedRole: number | null; // ID of role killed by Assassin
+    stolenRole: number | null; // ID of role stolen by Thief
     roomCode?: string;
     lobbyName?: string;
     createdAt?: string;
