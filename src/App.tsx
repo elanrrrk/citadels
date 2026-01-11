@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
 import { supabase } from './lib/supabase';
-import { createInitialState, ROLES, isGameComplete, getNextRoleTurn } from './gameLogic';
-import type { GameState, Player, TelegramWebApp } from './types';
-import { Crown, Coins, CheckCircle2, Circle, Play, Send, Users } from 'lucide-react';
+import { createInitialState, ROLES, isGameComplete, getNextRoleTurn, generateRoomCode } from './gameLogic';
+import type { GameState, Player, TelegramWebApp, LobbyInfo, AppView } from './types';
+import { Crown, Coins, CheckCircle2, Circle, Play, Send, Users, Plus, Search, X, LogOut } from 'lucide-react';
 
 declare global {
   interface Window {
@@ -14,10 +14,16 @@ declare global {
 
 export default function App() {
   const [game, setGame] = useState<GameState | null>(null);
-  const [roomCode] = useState("GLOBAL_ROOM");
+  const [roomCode, setRoomCode] = useState<string>("");
+  const [playerName, setPlayerName] = useState<string>("");
+  const [nameInputValue, setNameInputValue] = useState<string>("");
+  const [showNameInput, setShowNameInput] = useState<boolean>(false);
+  const [currentView, setCurrentView] = useState<AppView>('LANDING');
+  const [lobbies, setLobbies] = useState<LobbyInfo[]>([]);
 
   const tg = window.Telegram?.WebApp;
-  const user = tg?.initDataUnsafe?.user || { id: 1, first_name: "Игрок" };
+  const isTelegramUser = !!tg?.initDataUnsafe?.user;
+  const user = tg?.initDataUnsafe?.user || { id: Math.floor(Math.random() * 1000000), first_name: playerName || "Игрок" };
 
   // Haptic feedback helper
   const haptic = (type: 'light' | 'medium' | 'heavy' = 'medium') => {
@@ -32,7 +38,7 @@ export default function App() {
     try {
       const { error } = await supabase
         .from('games')
-        .upsert({ room_code: roomCode, state: newState }, { onConflict: 'room_code' });
+        .upsert({ room_code: newState.roomCode || roomCode, state: newState }, { onConflict: 'room_code' });
 
       if (error) {
         console.error('Database update error:', error);
@@ -42,12 +48,64 @@ export default function App() {
     }
   };
 
-  const joinOrCreate = async () => {
+  const createLobby = async () => {
+    haptic('medium');
+    const newRoomCode = generateRoomCode();
+    const newState = createInitialState(user, newRoomCode);
+
+    try {
+      const { error } = await supabase
+        .from('games')
+        .insert({ room_code: newRoomCode, state: newState });
+
+      if (error) {
+        console.error('Error creating lobby:', error);
+        return;
+      }
+
+      setRoomCode(newRoomCode);
+      setGame(newState);
+      setCurrentView('GAME');
+    } catch (e) {
+      console.error('Failed to create lobby:', e);
+    }
+  };
+
+  const fetchLobbies = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('games')
+        .select('room_code, state')
+        .eq('state->>phase', 'LOBBY');
+
+      if (error) {
+        console.error('Error fetching lobbies:', error);
+        return;
+      }
+
+      if (data) {
+        const lobbyList: LobbyInfo[] = data
+          .map((row: any) => ({
+            room_code: row.room_code,
+            host_name: row.state.players[0]?.name || 'Unknown',
+            player_count: row.state.players.length,
+            created_at: row.state.createdAt || new Date().toISOString()
+          }))
+          .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+        setLobbies(lobbyList);
+      }
+    } catch (e) {
+      console.error('Failed to fetch lobbies:', e);
+    }
+  };
+
+  const joinLobby = async (lobbyRoomCode: string) => {
+    haptic('medium');
     try {
       const { data, error } = await supabase
         .from('games')
         .select('*')
-        .eq('room_code', roomCode)
+        .eq('room_code', lobbyRoomCode)
         .maybeSingle();
 
       if (error && error.code !== 'PGRST116') {
@@ -56,36 +114,49 @@ export default function App() {
       }
 
       if (!data) {
-        const newState = createInitialState(user);
-        const { error: insertError } = await supabase
-          .from('games')
-          .upsert({ room_code: roomCode, state: newState }, { onConflict: 'room_code' });
-
-        if (insertError) {
-          console.error('Error creating game:', insertError);
-          return;
-        }
-        setGame(newState);
-      } else {
-        const s = data.state as GameState;
-        if (!s.players.find((p: Player) => p.id === String(user.id)) && s.phase === "LOBBY") {
-          s.players.push({
-            id: String(user.id),
-            name: user.first_name,
-            gold: 2,
-            isReady: false,
-            hand: [s.deck.pop()!, s.deck.pop()!, s.deck.pop()!, s.deck.pop()!],
-            districts: [],
-            role: null
-          });
-          s.log.push(`${user.first_name} присоединился к игре`);
-          await updateDB(s);
-        }
-        setGame(s);
+        alert('Лобби не найдено');
+        return;
       }
+
+      const s = data.state as GameState;
+
+      if (s.phase !== 'LOBBY') {
+        alert('Эта игра уже началась!');
+        return;
+      }
+
+      if (!s.players.find((p: Player) => p.id === String(user.id))) {
+        s.players.push({
+          id: String(user.id),
+          name: user.first_name,
+          gold: 2,
+          isReady: false,
+          hand: [s.deck.pop()!, s.deck.pop()!, s.deck.pop()!, s.deck.pop()!],
+          districts: [],
+          role: null
+        });
+        s.log.push(`${user.first_name} присоединился к игре`);
+        await updateDB(s);
+      }
+
+      setRoomCode(lobbyRoomCode);
+      setGame(s);
+      setCurrentView('GAME');
     } catch (e) {
-      console.error('Failed to join or create game:', e);
+      console.error('Failed to join lobby:', e);
     }
+  };
+
+  const exitToLanding = () => {
+    haptic('light');
+    if (game && game.phase !== 'LOBBY') {
+      if (!confirm('Вы уверены, что хотите выйти из игры?')) {
+        return;
+      }
+    }
+    setGame(null);
+    setRoomCode("");
+    setCurrentView('LANDING');
   };
 
   const toggleReady = async () => {
@@ -226,24 +297,218 @@ export default function App() {
   useEffect(() => {
     tg?.ready();
     tg?.expand();
-    joinOrCreate();
 
-    const channel = supabase
-      .channel('citadels')
-      .on('postgres_changes', {
-        event: 'UPDATE',
-        schema: 'public',
-        table: 'games'
-      }, (payload: any) => {
-        setGame(payload.new.state);
-      })
-      .subscribe();
+    // Check if browser user needs to enter name
+    if (!isTelegramUser && !playerName) {
+      setShowNameInput(true);
+      return;
+    }
 
-    return () => {
-      supabase.removeChannel(channel);
+    // Auto-fetch lobbies when viewing lobby list
+    if (currentView === 'LOBBY_LIST') {
+      fetchLobbies();
+
+      // Subscribe to real-time updates for lobbies
+      const channel = supabase
+        .channel('lobby-updates')
+        .on('postgres_changes', {
+          event: '*',
+          schema: 'public',
+          table: 'games'
+        }, () => {
+          fetchLobbies();
+        })
+        .subscribe();
+
+      return () => {
+        supabase.removeChannel(channel);
+      };
+    }
+
+    // Subscribe to game updates only when in game view
+    if (currentView === 'GAME' && roomCode) {
+      const channel = supabase
+        .channel(`game-${roomCode}`)
+        .on('postgres_changes', {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'games',
+          filter: `room_code=eq.${roomCode}`
+        }, (payload: any) => {
+          setGame(payload.new.state);
+        })
+        .subscribe();
+
+      return () => {
+        supabase.removeChannel(channel);
+      };
+    }
+  }, [playerName, currentView, roomCode]);
+
+  // Name input modal for browser users
+  if (showNameInput && !isTelegramUser) {
+    const handleSubmitName = () => {
+      const trimmedName = nameInputValue.trim();
+      if (trimmedName.length >= 2 && trimmedName.length <= 15) {
+        setPlayerName(trimmedName);
+        setShowNameInput(false);
+      } else {
+        alert('Имя должно быть от 2 до 15 символов');
+      }
     };
-  }, []);
 
+    return (
+      <div className="h-screen bg-brand-dark flex items-center justify-center p-4">
+        <div className="w-full max-w-md space-y-6 animate-fade-in">
+          <div className="text-center space-y-4">
+            <Crown className="w-20 h-20 text-brand-gold mx-auto drop-shadow-glow-yellow animate-pulse-slow" />
+            <h1 className="font-black text-3xl text-gradient-gold tracking-tight">CITADELS</h1>
+            <p className="text-slate-400 text-sm">Добро пожаловать в игру!</p>
+          </div>
+
+          <div className="card-active p-6 space-y-4">
+            <label className="block">
+              <span className="text-sm font-bold text-brand-gold uppercase tracking-widest mb-2 block">
+                Введите ваше имя
+              </span>
+              <input
+                type="text"
+                value={nameInputValue}
+                onChange={(e) => setNameInputValue(e.target.value)}
+                onKeyPress={(e) => e.key === 'Enter' && handleSubmitName()}
+                placeholder="Ваше имя..."
+                maxLength={15}
+                className="w-full px-4 py-3 bg-slate-800/50 border border-slate-700 rounded-xl text-white placeholder-slate-500 focus:border-brand-gold focus:outline-none focus:ring-2 focus:ring-brand-gold/20 transition-all"
+                autoFocus
+              />
+              <p className="text-xs text-slate-500 mt-2">От 2 до 15 символов</p>
+            </label>
+
+            <button
+              onClick={handleSubmitName}
+              className="btn-primary w-full"
+              disabled={nameInputValue.trim().length < 2}
+            >
+              <Play className="w-5 h-5 inline-block mr-2 fill-current" />
+              Войти в игру
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Landing Screen
+  if (currentView === 'LANDING') {
+    return (
+      <div className="min-h-screen bg-brand-dark text-slate-200 flex items-center justify-center p-4">
+        <div className="w-full max-w-md space-y-8 animate-fade-in">
+          <div className="text-center space-y-4">
+            <Crown className="w-24 h-24 text-brand-gold mx-auto drop-shadow-glow-yellow animate-pulse-slow" />
+            <h1 className="font-black text-4xl text-gradient-gold tracking-tight">CITADELS</h1>
+            <p className="text-slate-400 text-sm">Выберите действие</p>
+          </div>
+
+          <div className="space-y-4">
+            <button
+              onClick={createLobby}
+              className="btn-primary group"
+            >
+              <Plus className="w-6 h-6 inline-block mr-2" />
+              Создать лобби
+            </button>
+
+            <button
+              onClick={() => {
+                haptic('light');
+                setCurrentView('LOBBY_LIST');
+              }}
+              className="btn-secondary group"
+            >
+              <Search className="w-6 h-6 inline-block mr-2" />
+              Найти лобби
+            </button>
+          </div>
+
+          <div className="text-center text-xs text-slate-600">
+            <p>Игрок: {user.first_name}</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Lobby List Screen
+  if (currentView === 'LOBBY_LIST') {
+    return (
+      <div className="min-h-screen bg-brand-dark text-slate-200 flex flex-col">
+        {/* Header */}
+        <div className="glass-strong p-4 border-b border-brand-gold/20 flex justify-between items-center shadow-2xl safe-top sticky top-0 z-50 backdrop-blur-md">
+          <button
+            onClick={() => {
+              haptic('light');
+              setCurrentView('LANDING');
+            }}
+            className="p-2 hover:bg-slate-700/50 rounded-lg transition-all touch-feedback"
+          >
+            <X className="w-5 h-5 text-slate-400" />
+          </button>
+          <div className="flex items-center gap-2">
+            <Search className="text-brand-gold w-5 h-5" />
+            <span className="font-black tracking-tighter text-xl text-gradient-gold">Доступные лобби</span>
+          </div>
+          <div className="w-9" /> {/* Spacer for centering */}
+        </div>
+
+        {/* Lobby List */}
+        <div className="flex-1 overflow-y-auto p-4 space-y-3 custom-scrollbar">
+          {lobbies.length === 0 ? (
+            <div className="text-center py-12 space-y-3">
+              <Users className="w-16 h-16 text-slate-600 mx-auto" />
+              <p className="text-slate-500 text-sm">Нет доступных лобби</p>
+              <button
+                onClick={createLobby}
+                className="btn-primary max-w-xs mx-auto"
+              >
+                <Plus className="w-5 h-5 inline-block mr-2" />
+                Создать лобби
+              </button>
+            </div>
+          ) : (
+            lobbies.map((lobby, idx) => (
+              <button
+                key={lobby.room_code}
+                onClick={() => joinLobby(lobby.room_code)}
+                className="w-full card hover:card-active p-4 text-left transition-all touch-feedback animate-fade-in"
+                style={{ animationDelay: `${idx * 50}ms` }}
+              >
+                <div className="flex justify-between items-start mb-2">
+                  <div>
+                    <div className="flex items-center gap-2 mb-1">
+                      <Crown className="w-4 h-4 text-brand-gold" />
+                      <span className="font-bold text-white">{lobby.host_name}</span>
+                    </div>
+                    <div className="text-xs text-slate-500 font-mono">
+                      Код: {lobby.room_code}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-slate-800/50 border border-slate-700">
+                    <Users className="w-3.5 h-3.5 text-slate-400" />
+                    <span className="text-xs font-bold text-slate-300">{lobby.player_count}</span>
+                  </div>
+                </div>
+                <div className="text-[10px] text-slate-600">
+                  Создано: {new Date(lobby.created_at).toLocaleTimeString('ru-RU')}
+                </div>
+              </button>
+            ))
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  // Game View
   if (!game) {
     return (
       <div className="h-screen bg-brand-dark flex items-center justify-center">
@@ -266,6 +531,13 @@ export default function App() {
     <div className="min-h-screen bg-brand-dark text-slate-200 flex flex-col font-sans">
       {/* Header */}
       <div className="glass-strong p-4 border-b border-brand-gold/20 flex justify-between items-center shadow-2xl safe-top sticky top-0 z-50 backdrop-blur-md">
+        <button
+          onClick={exitToLanding}
+          className="p-2 hover:bg-slate-700/50 rounded-lg transition-all touch-feedback"
+          title="Выход"
+        >
+          <LogOut className="w-5 h-5 text-slate-400" />
+        </button>
         <div className="flex items-center gap-2">
           <Crown className="text-brand-gold w-5 h-5 drop-shadow-glow-yellow animate-pulse-slow" />
           <span className="font-black tracking-tighter text-xl text-gradient-gold">CITADELS</span>
@@ -280,6 +552,14 @@ export default function App() {
           </div>
         </div>
       </div>
+
+      {/* Room Code Display (only in lobby) */}
+      {game.phase === "LOBBY" && (
+        <div className="bg-slate-800/30 border-b border-slate-700/50 p-3 text-center">
+          <p className="text-xs text-slate-500 mb-1">Код комнаты</p>
+          <p className="text-lg font-mono font-black text-brand-gold tracking-widest">{game.roomCode}</p>
+        </div>
+      )}
 
       {/* Players List */}
       <div className="flex-1 overflow-y-auto p-4 space-y-3 custom-scrollbar">

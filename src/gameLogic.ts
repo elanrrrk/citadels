@@ -33,6 +33,18 @@ export const DISTRICTS: District[] = [
 ];
 
 /**
+ * Generate a unique 6-character room code
+ */
+export const generateRoomCode = (): string => {
+    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // Removed ambiguous characters
+    let code = '';
+    for (let i = 0; i < 6; i++) {
+        code += chars.charAt(Math.floor(Math.random() * chars.length));
+    }
+    return code;
+};
+
+/**
  * Shuffle array using Fisher-Yates algorithm
  */
 export const shuffleArray = <T>(array: T[]): T[] => {
@@ -47,7 +59,7 @@ export const shuffleArray = <T>(array: T[]): T[] => {
 /**
  * Create initial game state
  */
-export const createInitialState = (user: TelegramUser): GameState => {
+export const createInitialState = (user: TelegramUser, roomCode: string): GameState => {
     // Create deck with 3 copies of each district
     const fullDeck = [...DISTRICTS, ...DISTRICTS, ...DISTRICTS];
     const deck = shuffleArray(fullDeck);
@@ -77,7 +89,10 @@ export const createInitialState = (user: TelegramUser): GameState => {
         currentPickerIndex: 0,
         currentRoleTurn: 0,
         deck: deck,
-        log: ["Игра создана. Ожидание других игроков..."]
+        log: ["Игра создана. Ожидание других игроков..."],
+        roomCode: roomCode,
+        lobbyName: `${user.first_name}'s Lobby`,
+        createdAt: new Date().toISOString()
     };
 };
 

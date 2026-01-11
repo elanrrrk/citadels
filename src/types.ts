@@ -66,6 +66,15 @@ export interface Player {
 
 export type GamePhase = 'LOBBY' | 'SELECTION' | 'TURNS' | 'ENDED';
 
+export type AppView = 'LANDING' | 'LOBBY_LIST' | 'GAME';
+
+export interface LobbyInfo {
+    room_code: string;
+    host_name: string;
+    player_count: number;
+    created_at: string;
+}
+
 export interface GameState {
     phase: GamePhase;
     players: Player[];
@@ -75,6 +84,9 @@ export interface GameState {
     currentRoleTurn: number;
     deck: District[];
     log: string[];
+    roomCode?: string;
+    lobbyName?: string;
+    createdAt?: string;
 }
 
 // Supabase Types
