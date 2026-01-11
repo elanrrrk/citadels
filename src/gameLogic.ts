@@ -19,6 +19,6 @@ export const createInitialState = (firstPlayer: any) => ({
         isHost: true
     }],
     current_turn: 0,
-    deck: INITIAL_DECK.sort(() => Math.random() - 0.5),
+    deck: [...INITIAL_DECK].sort(() => Math.random() - 0.5),
     log: ["Комната создана"]
 });
