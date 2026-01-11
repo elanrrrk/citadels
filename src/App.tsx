@@ -1,156 +1,173 @@
 import { useEffect, useState } from 'react';
 import { supabase } from './lib/supabase';
-import { createInitialState } from './gameLogic';
+import { createInitialState, ROLES } from './gameLogic';
 
 declare global { interface Window { Telegram: any; } }
 
 export default function App() {
   const [game, setGame] = useState<any>(null);
-  const [roomCode] = useState("ROOM_123");
-
+  const [roomCode] = useState("GLOBAL_BATTLE");
   const tg = window.Telegram?.WebApp;
-  const user = tg?.initDataUnsafe?.user || { id: 1, first_name: "Локальный игрок" };
+  const user = tg?.initDataUnsafe?.user || { id: 1, first_name: "Игрок 1" };
 
-  // Функция загрузки игры
-  const loadGame = async () => {
-    const { data } = await supabase
-      .from('games')
-      .select('*')
-      .eq('room_code', roomCode)
-      .single();
-    if (data) setGame(data.state);
-  };
-
-  // Функция обновления базы данных
   const updateDB = async (newState: any) => {
-    await supabase
-      .from('games')
-      .update({ state: newState })
-      .eq('room_code', roomCode);
+    await supabase.from('games').update({ state: newState }).eq('room_code', roomCode);
   };
 
-  // Логика входа или создания комнаты
   const joinOrCreate = async () => {
-    const { data } = await supabase
-      .from('games')
-      .select('*')
-      .eq('room_code', roomCode)
-      .single();
-
+    const { data } = await supabase.from('games').select('*').eq('room_code', roomCode).single();
     if (!data) {
       const newState = createInitialState(user);
       await supabase.from('games').insert([{ room_code: roomCode, state: newState }]);
       setGame(newState);
     } else {
-      const currentState = data.state;
-      if (!currentState.players.find((p: any) => p.id === String(user.id))) {
-        const newState = {
-          ...currentState,
-          players: [...currentState.players, {
-            id: String(user.id),
-            name: user.first_name,
-            gold: 2,
-            hand: [],
-            districts: [],
-            isHost: false
-          }]
-        };
-        await updateDB(newState);
-        setGame(newState);
-      } else {
-        setGame(currentState);
+      const s = data.state;
+      if (!s.players.find((p: any) => p.id === String(user.id)) && s.phase === "LOBBY") {
+        s.players.push({
+          id: String(user.id), name: user.first_name, gold: 2,
+          hand: [s.deck.pop(), s.deck.pop(), s.deck.pop(), s.deck.pop()],
+          districts: [], role: null, isHost: false
+        });
+        await updateDB(s);
       }
+      setGame(s);
     }
   };
 
-  const handleTakeGold = async () => {
-    if (!game) return;
-    const newState = JSON.parse(JSON.stringify(game)); // Глубокое копирование
-    const player = newState.players.find((p: any) => p.id === String(user.id));
-    if (player) {
-      player.gold += 2;
-      newState.log.push(`${player.name} взял 2 золотых`);
-      await updateDB(newState);
+  const startGame = async () => {
+    const s = { ...game };
+    s.phase = "SELECTION";
+    s.availableRoles = [...ROLES].sort(() => Math.random() - 0.5);
+    s.log.push("Игра началась! Выбор ролей.");
+    await updateDB(s);
+  };
+
+  const pickRole = async (roleName: string) => {
+    const s = { ...game };
+    const player = s.players[s.currentPickerIndex];
+    player.role = roleName;
+    s.availableRoles = s.availableRoles.filter((r: any) => r.name !== roleName);
+
+    if (s.currentPickerIndex < s.players.length - 1) {
+      s.currentPickerIndex++;
+    } else {
+      s.phase = "TURNS";
+      s.currentRoleTurn = 1;
+      s.log.push("Все выбрали роли. Начало ходов.");
     }
+    await updateDB(s);
+  };
+
+  const buildDistrict = async (cardId: string) => {
+    const s = { ...game };
+    const player = s.players.find((p: any) => p.id === String(user.id));
+    const cardIndex = player.hand.findIndex((c: any) => c.id === cardId);
+    const card = player.hand[cardIndex];
+
+    if (player.gold >= card.cost) {
+      player.gold -= card.cost;
+      player.districts.push(card);
+      player.hand.splice(cardIndex, 1);
+      s.log.push(`${player.name} построил ${card.name}`);
+      await updateDB(s);
+    }
+  };
+
+  const endTurn = async () => {
+    const s = { ...game };
+    if (s.currentRoleTurn < 8) {
+      s.currentRoleTurn++;
+    } else {
+      s.phase = "SELECTION";
+      s.currentPickerIndex = 0;
+      s.players.forEach((p: any) => p.role = null);
+      s.availableRoles = [...ROLES].sort(() => Math.random() - 0.5);
+      s.log.push("Раунд завершен. Новый выбор ролей.");
+    }
+    await updateDB(s);
   };
 
   useEffect(() => {
-    if (tg) {
-      tg.ready();
-      tg.expand();
-    }
+    tg?.expand();
     joinOrCreate();
-
-    const channel = supabase
-      .channel('schema-db-changes')
-      .on('postgres_changes',
-        { event: 'UPDATE', schema: 'public', table: 'games', filter: `room_code=eq.${roomCode}` },
-        (payload: any) => {
-          if (payload.new && payload.new.state) {
-            setGame(payload.new.state);
-          }
-        }
-      )
-      .subscribe();
-
+    const channel = supabase.channel('game-sync')
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'games' },
+        (p: any) => setGame(p.new.state)).subscribe();
     return () => { supabase.removeChannel(channel); };
-  }, [roomCode]);
+  }, []);
 
-  if (!game) return (
-    <div className="h-screen bg-slate-900 flex items-center justify-center p-6 text-white font-sans">
-      <div className="text-center">
-        <h1 className="text-2xl font-bold mb-4">CITADELS</h1>
-        <p className="animate-pulse">Загрузка комнаты...</p>
-      </div>
-    </div>
-  );
+  if (!game) return <div className="p-10 text-white">Загрузка...</div>;
 
   const me = game.players.find((p: any) => p.id === String(user.id));
+  const isMyPick = game.phase === "SELECTION" && game.players[game.currentPickerIndex]?.id === String(user.id);
+  const myRole = ROLES.find(r => r.name === me?.role);
+  const isMyTurn = game.phase === "TURNS" && myRole?.id === game.currentRoleTurn;
 
   return (
     <div className="h-screen bg-slate-900 text-white p-4 flex flex-col font-sans overflow-hidden">
-      <div className="flex justify-between items-center border-b border-slate-700 pb-2 mb-4">
-        <span className="font-bold text-yellow-500 italic text-xl">CITADELS</span>
-        <span className="bg-slate-800 px-3 py-1 rounded-full text-sm">👥 {game.players.length}</span>
+      {/* Шапка */}
+      <div className="flex justify-between border-b border-slate-700 pb-2 mb-4">
+        <span className="text-yellow-500 font-bold">CITADELS</span>
+        <span className="text-xs text-slate-400">Фаза: {game.phase}</span>
       </div>
 
-      <div className="flex-1 overflow-y-auto space-y-3 pr-1">
+      {/* Список игроков */}
+      <div className="flex-1 overflow-y-auto space-y-2">
         {game.players.map((p: any) => (
-          <div key={p.id} className={`p-3 rounded-xl transition-all ${p.id === me?.id ? 'bg-slate-800 border border-yellow-600 shadow-lg shadow-yellow-900/20' : 'bg-slate-800/40 border border-slate-700'}`}>
-            <div className="flex justify-between items-center">
-              <span className={`font-medium ${p.id === me?.id ? 'text-yellow-400' : 'text-slate-200'}`}>
-                {p.name} {p.id === me?.id && " (Вы)"}
-              </span>
-              <span className="bg-yellow-900/30 text-yellow-500 px-2 py-0.5 rounded text-sm font-bold">
-                💰 {p.gold}
-              </span>
+          <div key={p.id} className={`p-3 rounded-lg ${p.id === String(user.id) ? 'bg-slate-800 ring-1 ring-yellow-500' : 'bg-slate-800/50'}`}>
+            <div className="flex justify-between">
+              <span className="text-sm font-bold">{p.name} {p.role && `(${p.role})`}</span>
+              <span className="text-yellow-400">💰{p.gold}</span>
             </div>
-            <div className="flex gap-1 mt-2 h-6">
-              {p.districts.length === 0 && <span className="text-[10px] text-slate-500 italic">Нет кварталов</span>}
-              {p.districts.map((d: any, idx: number) => (
-                <div key={idx} className="w-4 bg-blue-500 rounded-sm shadow-sm" title={d.name} />
+            <div className="flex gap-1 mt-1 overflow-x-auto">
+              {p.districts.map((d: any, i: number) => (
+                <div key={i} className={`w-4 h-6 rounded-sm bg-${d.color}-500 border border-white/20`} />
               ))}
             </div>
           </div>
         ))}
       </div>
 
-      <div className="mt-4 bg-slate-800 p-4 rounded-2xl shadow-2xl border-t border-slate-700">
-        <div className="grid grid-cols-2 gap-3 mb-4">
-          <button onClick={handleTakeGold} className="bg-gradient-to-r from-yellow-600 to-yellow-700 hover:from-yellow-500 active:scale-95 transition-all py-3 rounded-xl font-bold text-black shadow-lg">
-            ВЗЯТЬ 💰
-          </button>
-          <button className="bg-gradient-to-r from-blue-600 to-blue-700 opacity-50 py-3 rounded-xl font-bold cursor-not-allowed">
-            КАРТЫ 🎴
-          </button>
-        </div>
-        <div className="bg-black/20 p-2 rounded-lg">
-          <div className="text-[10px] uppercase text-slate-500 mb-1 font-bold">Журнал событий</div>
-          <div className="text-xs text-slate-300 h-10 overflow-hidden italic leading-tight">
-            {game.log.slice(-2).reverse().map((l: string, i: number) => (
-              <div key={i} className="truncate">• {l}</div>
+      {/* Игровое поле (управление) */}
+      <div className="mt-4 bg-slate-800 p-4 rounded-t-3xl shadow-2xl border-t border-slate-600">
+        {game.phase === "LOBBY" && me?.isHost && (
+          <button onClick={startGame} className="w-full bg-green-600 py-4 rounded-xl font-bold">НАЧАТЬ ИГРУ</button>
+        )}
+
+        {isMyPick && (
+          <div className="animate-bounce text-center text-yellow-500 mb-2 font-bold">ВАШ ОЧЕРЕДЬ ВЫБИРАТЬ РОЛЬ!</div>
+        )}
+
+        {game.phase === "SELECTION" && isMyPick && (
+          <div className="grid grid-cols-2 gap-2 max-h-40 overflow-y-auto p-1">
+            {game.availableRoles.map((r: any) => (
+              <button key={r.id} onClick={() => pickRole(r.name)} className="bg-slate-700 p-2 rounded text-xs hover:bg-slate-600">{r.name}</button>
             ))}
           </div>
+        )}
+
+        {game.phase === "TURNS" && (
+          <div>
+            <div className="text-center mb-2 text-blue-400">Ходит: {ROLES.find(r => r.id === game.currentRoleTurn)?.name}</div>
+            {isMyTurn ? (
+              <div className="space-y-3">
+                <div className="flex gap-2 overflow-x-auto pb-2">
+                  {me.hand.map((c: any) => (
+                    <button key={c.id} onClick={() => buildDistrict(c.id)} className={`flex-shrink-0 w-20 h-28 p-2 rounded border text-[10px] bg-${c.color}-900 border-${c.color}-400`}>
+                      {c.name} <br /> 💰{c.cost}
+                    </button>
+                  ))}
+                </div>
+                <button onClick={endTurn} className="w-full bg-blue-600 py-3 rounded-xl font-bold italic">ЗАВЕРШИТЬ ХОД</button>
+              </div>
+            ) : (
+              <div className="text-center text-slate-500 italic py-4">Ожидайте своего хода...</div>
+            )}
+          </div>
+        )}
+
+        <div className="mt-4 text-[10px] text-slate-500 h-8 overflow-hidden bg-black/20 p-1 rounded">
+          {game.log.slice(-1)}
         </div>
       </div>
     </div>
