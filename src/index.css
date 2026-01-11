@@ -105,6 +105,12 @@
     background: linear-gradient(135deg, #a855f7 0%, #7e22ce 100%);
   }
 
+  .district-mini-card {
+    @apply flex flex-col justify-between p-1.5 rounded-lg border border-white/10 shadow-sm transition-all hover:scale-105 active:scale-95;
+    width: 64px;
+    height: 80px;
+  }
+
   /* Button Styles */
   .btn-primary {
     @apply w-full py-4 px-6 rounded-2xl font-bold text-lg transition-all transform active:scale-95;
@@ -142,6 +148,12 @@
         rgba(255, 255, 255, 0) 100%);
     background-size: 200% 100%;
     animation: shimmer 2s linear infinite;
+  }
+
+  .compact-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(64px, 1fr));
+    gap: 8px;
   }
 }
 

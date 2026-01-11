@@ -2,13 +2,24 @@ import { useEffect, useState } from 'react';
 import { supabase } from './lib/supabase';
 import { createInitialState, ROLES, isGameComplete, handleNextRoleAdvance, generateRoomCode } from './gameLogic';
 import type { GameState, Player, TelegramWebApp, LobbyInfo, AppView } from './types';
-import { Crown, Coins, CheckCircle2, Circle, Play, Send, Users, Plus, Search, X, LogOut } from 'lucide-react';
+import { Crown, Coins, CheckCircle2, Circle, Play, Send, Users, Plus, Search, X, LogOut, Store, Church, Shield, Castle, Sparkles } from 'lucide-react';
 
 declare global {
   interface Window {
     Telegram?: {
       WebApp: TelegramWebApp;
     };
+  }
+}
+
+function DistrictIcon({ color, className }: { color: string, className?: string }) {
+  switch (color) {
+    case 'green': return <Store className={className} />;
+    case 'blue': return <Church className={className} />;
+    case 'red': return <Shield className={className} />;
+    case 'yellow': return <Castle className={className} />;
+    case 'purple': return <Sparkles className={className} />;
+    default: return <Plus className={className} />;
   }
 }
 
@@ -227,10 +238,17 @@ export default function App() {
     haptic('heavy');
     const s = { ...game };
     s.phase = "SELECTION";
-    s.crownPlayerId = s.players[Math.floor(Math.random() * s.players.length)].id;
+
+    // Choose random King on game start
+    const randomKing = s.players[Math.floor(Math.random() * s.players.length)];
+    s.crownPlayerId = randomKing.id;
     s.currentPickerIndex = s.players.findIndex((p: Player) => p.id === s.crownPlayerId);
-    s.availableRoles = [...ROLES].sort(() => Math.random() - 0.5);
-    s.log.push("🎮 Игра началась! Выбор ролей...");
+
+    // Initial role distribution: 8 roles total, 1 discarded face-down, 7 available to the King
+    const allRoles = [...ROLES].sort(() => Math.random() - 0.5);
+    s.availableRoles = allRoles.slice(1);
+
+    s.log.push(`🎮 Игра началась! ${randomKing.name} получает корону и выбирает первым.`);
     await updateDB(s);
   };
 
@@ -249,11 +267,14 @@ export default function App() {
     s.availableRoles = s.availableRoles.filter(r => r.id !== roleId);
     s.log.push(`${me.name} выбрал роль`);
 
-    // Move to next picker
-    s.currentPickerIndex++;
+    // Move to next picker circularly
+    s.currentPickerIndex = (s.currentPickerIndex + 1) % s.players.length;
+
+    // Count how many players have picked roles this round
+    const rolesPicked = s.players.filter(p => p.role !== null).length;
 
     // If all players picked roles, start turns
-    if (s.currentPickerIndex >= s.players.length) {
+    if (rolesPicked === s.players.length) {
       s.phase = "TURNS";
       s.currentRoleTurn = 0; // Will be advanced to 1 by handleNextRoleAdvance
       const nextState = handleNextRoleAdvance(s);
@@ -657,19 +678,30 @@ export default function App() {
               </div>
             </div>
 
-            {/* Districts bar */}
-            <div className="flex gap-1.5 h-8 items-end">
-              {p.districts.length === 0 && (
-                <div className="text-[10px] text-slate-600 italic">Нет построек</div>
+            {/* Districts Grid */}
+            <div className="mt-4 compact-grid">
+              {p.districts.length === 0 ? (
+                <div className="col-span-full text-center py-2 text-slate-600 italic text-[10px]">
+                  Нет построек
+                </div>
+              ) : (
+                p.districts.map((d, i) => (
+                  <div
+                    key={`${d.id}-${i}`}
+                    className={`district-mini-card district-${d.color} animate-scale-in`}
+                    style={{ animationDelay: `${i * 30}ms` }}
+                    title={d.type}
+                  >
+                    <div className="flex justify-between items-start">
+                      <DistrictIcon color={d.color} className="w-4 h-4 text-white/90 drop-shadow-sm" />
+                      <span className="text-[10px] font-black text-white/90">💰{d.cost}</span>
+                    </div>
+                    <div className="text-[8px] font-bold text-white leading-tight break-words h-5 overflow-hidden">
+                      {d.name}
+                    </div>
+                  </div>
+                ))
               )}
-              {p.districts.map((d, i: number) => (
-                <div
-                  key={i}
-                  className={`w-3 rounded-t-sm shadow-md transition-all hover:scale-110 district-${d.color}`}
-                  style={{ height: `${20 + i * 4}px` }}
-                  title={`${d.name} (${d.cost} золота)`}
-                />
-              ))}
             </div>
 
             {p.role && (
@@ -719,15 +751,18 @@ export default function App() {
             <h3 className="text-center text-brand-gold font-black text-sm uppercase tracking-widest animate-pulse">
               Выберите свою роль
             </h3>
-            <div className="grid grid-cols-2 gap-2 max-h-48 overflow-y-auto custom-scrollbar pr-1">
+            <div className="grid grid-cols-2 gap-3 max-h-[50vh] overflow-y-auto custom-scrollbar pr-1 pb-4">
               {game.availableRoles.map((r) => (
                 <button
                   key={r.id}
                   onClick={() => pickRole(r.id)}
-                  className="bg-slate-800/80 border border-slate-700 p-3 rounded-xl text-left hover:border-brand-gold transition-all group touch-feedback"
+                  className="bg-slate-800/90 border-2 border-slate-700/50 p-4 rounded-2xl text-left hover:border-brand-gold hover:bg-slate-700/50 transition-all group touch-feedback shadow-lg relative overflow-hidden"
                 >
-                  <div className={`text-xs font-bold uppercase ${r.color}`}>{r.name}</div>
-                  <div className="text-[9px] text-slate-500 leading-tight group-hover:text-slate-300 transition-colors">
+                  <div className="absolute top-0 right-0 p-2 opacity-10 group-hover:opacity-20">
+                    <Crown className="w-12 h-12 -rotate-12" />
+                  </div>
+                  <div className={`text-sm font-black uppercase tracking-wider mb-1 ${r.color}`}>{r.name}</div>
+                  <div className="text-[10px] text-slate-400 font-medium leading-tight group-hover:text-slate-200 transition-colors">
                     {r.power}
                   </div>
                 </button>
@@ -768,17 +803,27 @@ export default function App() {
                       key={c.id}
                       onClick={() => buildDistrict(c.id)}
                       disabled={me.gold < c.cost || (me.districtsBuilt >= (me.role === "Зодчий" ? 3 : 1))}
-                      className={`flex-shrink-0 w-24 h-36 rounded-xl p-2 border-2 flex flex-col justify-between items-start transition-all touch-feedback ${(me.gold >= c.cost && (me.districtsBuilt < (me.role === "Зодчий" ? 3 : 1)))
-                        ? 'bg-slate-800 border-slate-700 hover:border-brand-gold hover:shadow-glow-yellow'
-                        : 'bg-slate-900/50 border-slate-800 opacity-50 cursor-not-allowed'
+                      className={`flex-shrink-0 w-28 h-40 rounded-2xl p-3 border-2 flex flex-col justify-between items-start transition-all touch-feedback relative overflow-hidden ${(me.gold >= c.cost && (me.districtsBuilt < (me.role === "Зодчий" ? 3 : 1)))
+                        ? `bg-slate-800 border-slate-700/50 hover:border-brand-gold hover:shadow-glow-yellow shadow-xl`
+                        : 'bg-slate-900/50 border-slate-800 opacity-40 cursor-not-allowed'
                         }`}
                     >
-                      <div className={`text-[10px] font-black uppercase text-${c.color}-400`}>
-                        {c.type}
+                      <div className="w-full flex justify-between items-start mb-2">
+                        <div className={`p-1.5 rounded-lg district-${c.color} shadow-inner`}>
+                          <DistrictIcon color={c.color} className="w-3.5 h-3.5 text-white" />
+                        </div>
+                        <div className="font-black text-brand-gold text-xs bg-slate-900/80 px-1.5 py-0.5 rounded-md border border-brand-gold/20">
+                          💰{c.cost}
+                        </div>
                       </div>
-                      <div className="text-xs font-bold leading-tight">{c.name}</div>
-                      <div className="w-full flex justify-end font-black text-brand-gold text-sm">
-                        💰{c.cost}
+
+                      <div className="mt-auto">
+                        <div className={`text-[9px] font-black uppercase tracking-tighter text-${c.color}-400 mb-0.5`}>
+                          {c.type}
+                        </div>
+                        <div className="text-[11px] font-bold text-white leading-tight line-clamp-2">
+                          {c.name}
+                        </div>
                       </div>
                     </button>
                   ))}

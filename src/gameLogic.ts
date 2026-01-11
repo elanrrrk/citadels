@@ -118,9 +118,19 @@ export const handleNextRoleAdvance = (state: GameState): GameState => {
         });
         s.killedRole = null;
         s.stolenRole = null;
-        s.availableRoles = shuffleArray([...ROLES]);
-        s.currentPickerIndex = s.players.findIndex(p => p.id === s.crownPlayerId);
-        s.log.push("🔄 Раунд окончен. Выбор ролей нового раунда!");
+
+        // Citadels role distribution:
+        // 1. Shuffle all 8 roles
+        const allRoles = shuffleArray([...ROLES]);
+        // 2. Discard 1 role face-down (not available for selection)
+        // This leaves 7 roles for the King to choose from
+        s.availableRoles = allRoles.slice(1);
+
+        // First picker is the one with the crown
+        const crownIndex = s.players.findIndex(p => p.id === s.crownPlayerId);
+        s.currentPickerIndex = crownIndex !== -1 ? crownIndex : 0;
+
+        s.log.push("🔄 Раунд окончен. Король начинает выбор ролей!");
         return s;
     }
 
