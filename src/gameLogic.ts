@@ -1,4 +1,6 @@
-export const ROLES = [
+import type { Role, District, GameState, TelegramUser } from './types';
+
+export const ROLES: Role[] = [
     { id: 1, name: "Ассасин", color: "text-slate-400", power: "Убивает персонажа" },
     { id: 2, name: "Вор", color: "text-slate-400", power: "Крадет золото" },
     { id: 3, name: "Чародей", color: "text-purple-400", power: "Меняет карты" },
@@ -9,25 +11,62 @@ export const ROLES = [
     { id: 8, name: "Кондотьер", color: "text-red-400", power: "Золото за красные" }
 ];
 
-export const DISTRICTS = [
+export const DISTRICTS: District[] = [
     { id: 'd1', name: "Таверна", cost: 1, color: "green", type: "Торговый" },
     { id: 'd2', name: "Рынок", cost: 2, color: "green", type: "Торговый" },
+    { id: 'd3', name: "Торговый пост", cost: 2, color: "green", type: "Торговый" },
     { id: 'd4', name: "Храм", cost: 1, color: "blue", type: "Религиозный" },
+    { id: 'd5', name: "Церковь", cost: 2, color: "blue", type: "Религиозный" },
     { id: 'd6', name: "Крепость", cost: 3, color: "red", type: "Военный" },
     { id: 'd7', name: "Замок", cost: 4, color: "yellow", type: "Дворянский" },
-    { id: 'd11', name: "Ратуша", cost: 5, color: "green", type: "Торговый" },
-    { id: 'd12', name: "Монастырь", cost: 3, color: "blue", type: "Религиозный" },
+    { id: 'd8', name: "Дворец", cost: 5, color: "yellow", type: "Дворянский" },
+    { id: 'd9', name: "Гавань", cost: 4, color: "green", type: "Торговый" },
+    { id: 'd10', name: "Ратуша", cost: 5, color: "green", type: "Торговый" },
+    { id: 'd11', name: "Монастырь", cost: 3, color: "blue", type: "Религиозный" },
+    { id: 'd12', name: "Собор", cost: 5, color: "blue", type: "Религиозный" },
+    { id: 'd13', name: "Башня", cost: 2, color: "red", type: "Военный" },
+    { id: 'd14', name: "Тюрьма", cost: 2, color: "red", type: "Военный" },
+    { id: 'd15', name: "Казармы", cost: 3, color: "red", type: "Военный" },
+    { id: 'd16', name: "Усадьба", cost: 3, color: "yellow", type: "Дворянский" },
+    { id: 'd17', name: "Поместье", cost: 5, color: "purple", type: "Уникальный" },
+    { id: 'd18', name: "Лаборатория", cost: 5, color: "purple", type: "Уникальный" },
 ];
 
-export const createInitialState = (user: any) => {
-    const deck = [...DISTRICTS, ...DISTRICTS, ...DISTRICTS].sort(() => Math.random() - 0.5);
+/**
+ * Shuffle array using Fisher-Yates algorithm
+ */
+export const shuffleArray = <T>(array: T[]): T[] => {
+    const shuffled = [...array];
+    for (let i = shuffled.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+    }
+    return shuffled;
+};
+
+/**
+ * Create initial game state
+ */
+export const createInitialState = (user: TelegramUser): GameState => {
+    // Create deck with 3 copies of each district
+    const fullDeck = [...DISTRICTS, ...DISTRICTS, ...DISTRICTS];
+    const deck = shuffleArray(fullDeck);
+
+    // Give first player 4 cards
+    const initialHand = [
+        deck.pop()!,
+        deck.pop()!,
+        deck.pop()!,
+        deck.pop()!
+    ];
+
     return {
         phase: "LOBBY",
         players: [{
             id: String(user.id),
             name: user.first_name,
             gold: 2,
-            hand: [deck.pop(), deck.pop(), deck.pop(), deck.pop()],
+            hand: initialHand,
             districts: [],
             role: null,
             isReady: false,
@@ -38,6 +77,20 @@ export const createInitialState = (user: any) => {
         currentPickerIndex: 0,
         currentRoleTurn: 0,
         deck: deck,
-        log: ["Ожидание готовности игроков..."]
+        log: ["Игра создана. Ожидание других игроков..."]
     };
+};
+
+/**
+ * Check if game is complete (any player has 8 districts)
+ */
+export const isGameComplete = (state: GameState): boolean => {
+    return state.players.some(p => p.districts.length >= 8);
+};
+
+/**
+ * Get next role turn
+ */
+export const getNextRoleTurn = (currentTurn: number): number => {
+    return currentTurn >= 8 ? 1 : currentTurn + 1;
 };
