@@ -1,7 +1,7 @@
 {
     "name": "citadels-game",
     "private": true,
-    "version": "0.0.0",
+    "version": "1.0.0",
     "type": "module",
     "scripts": {
         "dev": "vite",
@@ -9,16 +9,16 @@
         "preview": "vite preview"
     },
     "dependencies": {
-        "@supabase/supabase-js": "^2.39.0",
-        "lucide-react": "^0.263.1",
-        "react": "^18.2.0",
-        "react-dom": "^18.2.0"
+        "@supabase/supabase-js": "^2.47.12",
+        "lucide-react": "^0.471.0",
+        "react": "^19.0.0",
+        "react-dom": "^19.0.0"
     },
     "devDependencies": {
-        "@types/react": "^18.2.0",
-        "@types/react-dom": "^18.2.0",
-        "@vitejs/plugin-react": "^4.0.0",
-        "typescript": "^5.0.2",
-        "vite": "^4.4.0"
+        "@types/react": "^19.0.0",
+        "@types/react-dom": "^19.0.0",
+        "@vitejs/plugin-react": "^4.3.4",
+        "typescript": "^5.7.3",
+        "vite": "^6.0.7"
     }
 }
