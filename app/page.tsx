@@ -1,42 +1,53 @@
+export const runtime = 'edge'; // Критически важно для Cloudflare!
+
 'use client'
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import { supabase } from '@/lib/supabase'
 
 export default function Home() {
-  const [room, setRoom] = useState<any>(null)
+  const [roomCode, setRoomCode] = useState<string | null>(null)
+  const [loading, setLoading] = useState(false)
 
-  // Подписка на изменения в реальном времени
-  useEffect(() => {
-    const channel = supabase.channel('room_updates')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'rooms' },
-        (payload) => setRoom(payload.new))
-      .subscribe()
+  const createRoom = async () => {
+    setLoading(true)
+    // Генерируем случайный код из 4 цифр
+    const randomCode = Math.floor(1000 + Math.random() * 9000).toString()
 
-    return () => { supabase.removeChannel(channel) }
-  }, [])
+    const { data, error } = await supabase
+      .from('rooms')
+      .insert([{ room_code: randomCode, status: 'lobby' }])
+      .select()
+
+    if (error) {
+      console.error(error)
+      alert('Ошибка при создании комнаты: ' + error.message)
+    } else {
+      setRoomCode(data[0].room_code)
+    }
+    setLoading(false)
+  }
 
   return (
-    <div className="flex flex-col items-center justify-center min-h-screen bg-slate-900 text-white p-4">
-      <h1 className="text-3xl font-bold mb-8">🏰 Цитадели Online</h1>
+    <main className="flex min-h-screen flex-col items-center justify-center bg-slate-900 text-white p-6 text-center">
+      <h1 className="text-4xl font-bold mb-8 text-amber-500">🏰 Цитадели</h1>
 
-      {!room ? (
-        <button
-          onClick={async () => {
-            // Логика создания комнаты
-            const { data } = await supabase.from('rooms').insert([{ room_code: '1234' }]).select()
-            if (data) setRoom(data[0])
-          }}
-          className="bg-amber-600 hover:bg-amber-500 px-8 py-4 rounded-xl font-bold"
-        >
-          Создать игру
-        </button>
+      {!roomCode ? (
+        <div className="space-y-4">
+          <button
+            onClick={createRoom}
+            disabled={loading}
+            className="bg-amber-600 hover:bg-amber-500 text-white px-8 py-4 rounded-2xl font-bold transition-all transform active:scale-95 shadow-lg"
+          >
+            {loading ? 'Создание...' : 'Создать новую игру'}
+          </button>
+        </div>
       ) : (
-        <div className="text-center">
-          <p className="text-xl">Код комнаты: <span className="font-mono text-amber-400">{room.room_code}</span></p>
-          <p className="mt-4">Статус: {room.status}</p>
-          {/* Сюда добавим список игроков и саму игру */}
+        <div className="bg-slate-800 p-8 rounded-3xl border border-slate-700 shadow-2xl">
+          <p className="text-slate-400 mb-2 uppercase tracking-widest text-sm">Код комнаты</p>
+          <p className="text-6xl font-black text-amber-400 tracking-tighter">{roomCode}</p>
+          <p className="mt-6 text-green-400 animate-pulse font-medium">Ожидание друзей (до 5 чел)...</p>
         </div>
       )}
-    </div>
+    </main>
   )
 }

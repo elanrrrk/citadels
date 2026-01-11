@@ -1,12 +1,24 @@
+export const runtime = 'edge'; // Обязательно для Workers/Pages!
+
 import { Bot, webhookCallback } from "grammy";
 
-const bot = new Bot(process.env.TELEGRAM_BOT_TOKEN!);
+const token = process.env.TELEGRAM_BOT_TOKEN;
+if (!token) throw new Error("TELEGRAM_BOT_TOKEN не задан в настройках!");
 
+const bot = new Bot(token);
+
+// Команда /start
 bot.command("start", (ctx) => {
-    return ctx.reply("Привет! Готов строить город?", {
+    return ctx.reply("🏰 Добро пожаловать в Цитадели!\n\nНажми кнопку ниже, чтобы открыть игру на 5 игроков.", {
         reply_markup: {
             inline_keyboard: [
-                [{ text: "Играть", web_app: { url: "https://твой-сайт.vercel.app" } }]
+                [
+                    {
+                        text: "🚀 Начать игру",
+                        // СЮДА НУЖНО БУДЕТ ВСТАВИТЬ ССЫЛКУ ПОСЛЕ ДЕПЛОЯ
+                        web_app: { url: "https://your-project.pages.dev" }
+                    }
+                ]
             ]
         }
     });
